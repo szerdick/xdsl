@@ -1918,6 +1918,86 @@ class ReduceOp(IRDLOperation):
         return reduction
 
 
+@irdl_op_definition
+class SoftmaxOp(IRDLOperation):
+    """
+    Performs softmax
+
+    softmax(x, d)_i = exp(x_i - max(x, d)) / sum_j(exp(x_j - max(x, d)))
+
+    See external [documentation](https://mlir.llvm.org/docs/Dialects/Linalg/#linalgsoftmax-linalgsoftmaxop).
+    """
+
+    name = "linalg.softmax"
+
+    input = operand_def(base(TensorType))
+    output = operand_def(base(TensorType))
+    result = var_result_def(TensorType)
+    dimension = prop_def(IntegerAttr[IntegerType])  # i64 by convention
+
+    def __init__(
+        self,
+        input: SSAValue,
+        output: SSAValue,
+        dimension: int | IntegerAttr,
+        attributes: Mapping[str, Attribute] | None = None,
+    ):
+        if isinstance(dimension, int):
+            dimension = IntegerAttr(dimension, i64)
+        if isa(output.type, TensorType):
+            result_types = (output.type,)
+        else:
+            result_types = ()
+        super().__init__(
+            operands=(input, output),
+            result_types=[result_types],
+            properties={"dimension": dimension},
+            attributes=dict(attributes) if attributes else {},
+        )
+
+    def print(self, printer: Printer):
+        printer.print_string(" dimension(")
+        printer.print_int(self.dimension.value.data)
+        printer.print_string(") ins(")
+        printer.print_ssa_value(self.input)
+        printer.print_string(" : ")
+        printer.print_attribute(self.input.type)
+        printer.print_string(") outs(")
+        printer.print_ssa_value(self.output)
+        printer.print_string(" : ")
+        printer.print_attribute(self.output.type)
+        printer.print_string(")")
+        if self.attributes:
+            printer.print_string(" ")
+            printer.print_op_attributes(self.attributes)
+        if self.result:
+            printer.print_string(" -> ")
+            printer.print_attribute(self.result[0].type)
+
+    @classmethod
+    def parse(cls, parser: Parser) -> Self:
+        parser.parse_keyword("dimension")
+        parser.parse_punctuation("(")
+        dim = parser.parse_integer()
+        parser.parse_punctuation(")")
+        parser.parse_keyword("ins")
+        parser.parse_punctuation("(")
+        input_val = parser.parse_operand()
+        parser.parse_punctuation(":")
+        parser.parse_type()
+        parser.parse_punctuation(")")
+        parser.parse_keyword("outs")
+        parser.parse_punctuation("(")
+        output_val = parser.parse_operand()
+        parser.parse_punctuation(":")
+        parser.parse_type()
+        parser.parse_punctuation(")")
+        attrs = parser.parse_optional_attr_dict()
+        if parser.parse_optional_punctuation("->"):
+            parser.parse_type()
+        return cls(input_val, output_val, dim, attributes=attrs)
+
+
 Linalg = Dialect(
     "linalg",
     [
@@ -1947,6 +2027,7 @@ Linalg = Dialect(
         Conv2DNhwc_FhwcOp,
         BroadcastOp,
         ReduceOp,
+        SoftmaxOp,
     ],
     [
         IteratorTypeAttr,

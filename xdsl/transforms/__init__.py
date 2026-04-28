@@ -280,6 +280,11 @@ def get_all_passes() -> dict[str, Callable[[], type[ModulePass]]]:
 
         return dead_code_elimination.DeadCodeElimination
 
+    def get_decompose_softmax():
+        from xdsl.transforms import decompose_softmax
+
+        return decompose_softmax.DecomposeSoftmaxPass
+
     def get_distribute_stencil():
         from xdsl.transforms.experimental.dmp import stencil_global_to_local
 
@@ -720,6 +725,7 @@ def get_all_passes() -> dict[str, Callable[[], type[ModulePass]]]:
         "csl-stencil-to-csl-wrapper": get_csl_stencil_to_csl_wrapper,
         "csl-wrapper-hoist-buffers": get_csl_wrapper_hoist_buffers,
         "dce": get_dce,
+        "decompose-softmax": get_decompose_softmax,
         "distribute-stencil": get_distribute_stencil,
         "dmp-to-mpi": get_dmp_to_mpi,
         "empty-tensor-to-alloc-tensor": get_empty_tensor_to_alloc_tensor,
