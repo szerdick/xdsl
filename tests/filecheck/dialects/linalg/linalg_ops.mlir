@@ -83,6 +83,12 @@ linalg.generic {indexing_maps = [affine_map<(d0, d1) -> ()>, affine_map<(d0, d1)
      linalg.yield %22 : f32
  }
 
+ %s1, %s2 = "test.op"() : () -> (tensor<16xf32>, tensor<16xf32>)
+ %sm1 = linalg.softmax dimension(0) ins(%s1 : tensor<16xf32>) outs(%s2 : tensor<16xf32>) {acc_bound = 1.000000e-06 : f32} -> tensor<16xf32>
+
+ %s3, %s4 = "test.op"() : () -> (tensor<4x8xf32>, tensor<4x8xf32>)
+ %sm2 = linalg.softmax dimension(1) ins(%s3 : tensor<4x8xf32>) outs(%s4 : tensor<4x8xf32>) -> tensor<4x8xf32>
+
 
 // CHECK:       builtin.module {
 // CHECK-NEXT:    %{{.*}}, %{{.*}} = "test.op"() : () -> (f32, memref<1x256xf32>)
@@ -147,6 +153,10 @@ linalg.generic {indexing_maps = [affine_map<(d0, d1) -> ()>, affine_map<(d0, d1)
 // CHECK-NEXT:      %{{.*}} = arith.addf %{{.*}}, %{{.*}} : f32
 // CHECK-NEXT:      linalg.yield %{{.*}} : f32
 // CHECK-NEXT:    }
+// CHECK-NEXT:    %{{.*}}, %{{.*}} = "test.op"() : () -> (tensor<16xf32>, tensor<16xf32>)
+// CHECK-NEXT:    %{{.*}} = linalg.softmax dimension(0) ins(%{{.*}} : tensor<16xf32>) outs(%{{.*}} : tensor<16xf32>) {acc_bound = 1.000000e-06 : f32} -> tensor<16xf32>
+// CHECK-NEXT:    %{{.*}}, %{{.*}} = "test.op"() : () -> (tensor<4x8xf32>, tensor<4x8xf32>)
+// CHECK-NEXT:    %{{.*}} = linalg.softmax dimension(1) ins(%{{.*}} : tensor<4x8xf32>) outs(%{{.*}} : tensor<4x8xf32>) -> tensor<4x8xf32>
 // CHECK-NEXT:  }
 
 
@@ -284,4 +294,8 @@ linalg.generic {indexing_maps = [affine_map<(d0, d1) -> ()>, affine_map<(d0, d1)
 // CHECK-GENERIC-NEXT:      %{{.*}} = "arith.addf"(%{{.*}}, %{{.*}}) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
 // CHECK-GENERIC-NEXT:      "linalg.yield"(%{{.*}}) : (f32) -> ()
 // CHECK-GENERIC-NEXT:    }) : (tensor<12x20xf32>, tensor<20xf32>) -> tensor<20xf32>
+// CHECK-GENERIC-NEXT:    %{{.*}}, %{{.*}} = "test.op"() : () -> (tensor<16xf32>, tensor<16xf32>)
+// CHECK-GENERIC-NEXT:    %{{.*}} = "linalg.softmax"(%{{.*}}, %{{.*}}) <{dimension = 0 : i64}> {acc_bound = 1.000000e-06 : f32} : (tensor<16xf32>, tensor<16xf32>) -> tensor<16xf32>
+// CHECK-GENERIC-NEXT:    %{{.*}}, %{{.*}} = "test.op"() : () -> (tensor<4x8xf32>, tensor<4x8xf32>)
+// CHECK-GENERIC-NEXT:    %{{.*}} = "linalg.softmax"(%{{.*}}, %{{.*}}) <{dimension = 1 : i64}> : (tensor<4x8xf32>, tensor<4x8xf32>) -> tensor<4x8xf32>
 // CHECK-GENERIC-NEXT:  }) : () -> ()

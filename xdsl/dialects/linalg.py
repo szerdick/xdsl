@@ -1968,7 +1968,6 @@ class SoftmaxOp(IRDLOperation):
         printer.print_attribute(self.output.type)
         printer.print_string(")")
         if self.attributes:
-            printer.print_string(" ")
             printer.print_op_attributes(self.attributes)
         if self.result:
             printer.print_string(" -> ")

@@ -1,19 +1,3 @@
-"""
-Decompose `linalg.softmax` into its elementwise primitive form.
-
-Mirrors upstream MLIR's `SoftmaxOp::decomposeOperation`
-(`mlir/lib/Dialect/Linalg/IR/LinalgOps.cpp`):
-
-  Step 1: max along reductionDim
-  Step 2: numerator = exp(input - max)        <- math.exp gets `acc_bound`
-  Step 3: denominator = sum along reductionDim
-  Step 4: result = numerator / denominator
-
-Discardable attribute on `linalg.softmax`:
-  - `acc_bound` (FloatAttr): per-output accuracy bound. Propagated to each
-    emitted `math.exp` via `propagate_acc_bound`.
-"""
-
 from dataclasses import dataclass
 
 from xdsl.context import Context
@@ -39,9 +23,9 @@ from xdsl.pattern_rewriter import (
 
 
 def propagate_acc_bound(softmax_bound: FloatAttr) -> FloatAttr:
-    """Compute the per-`math.exp` accuracy bound from the softmax accuracy bound.
+    """Compute the per-`math.exp` accuracy bound from the per-output softmax accuracy bound.
 
-    Currently the identity. The right rule depends on a forward error analysis
+    Currently the identity is used as placeholder. The right rule depends on a forward error analysis
     of  exp(x_i - m) / sum_j exp(x_j - m); a conservative placeholder for an
     N-element reduction would be  softmax_bound / (2N + 1).
     """
@@ -242,11 +226,11 @@ class DecomposeSoftmaxPattern(RewritePattern):
 
 @dataclass(frozen=True)
 class DecomposeSoftmaxPass(ModulePass):
-    """Decompose `linalg.softmax` to elementwise primitives.
+    """Decompose `linalg.softmax` to elementwise primitive form.
 
-    Mirrors upstream MLIR's `SoftmaxOp::decomposeOperation`. Propagates the
-    discardable `acc_bound` attribute from softmax to each emitted `math.exp`
-    via `propagate_acc_bound` (currently identity).
+    Mirrors upstream MLIR's `SoftmaxOp::decomposeOperation`. The`acc_bound`
+    attribute from softmax is propagatedto each emitted `math.exp`
+    via `propagate_acc_bound`.
     """
 
     name = "decompose-softmax"
