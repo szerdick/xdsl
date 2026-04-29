@@ -22,14 +22,15 @@ from xdsl.pattern_rewriter import (
 )
 
 
-def propagate_acc_bound(softmax_bound: FloatAttr) -> FloatAttr:
+def propagate_acc_bound(softmax_bound: FloatAttr, N: int) -> FloatAttr:
     """Compute the per-`math.exp` accuracy bound from the per-output softmax accuracy bound.
 
-    Currently the identity is used as placeholder. The right rule depends on a forward error analysis
-    of  exp(x_i - m) / sum_j exp(x_j - m); a conservative placeholder for an
-    N-element reduction would be  softmax_bound / (2N + 1).
+    `N` is the length of the dimension softmax reduces over.
+    Currently assuming the softmax_bound is l_infinity.
     """
-    return softmax_bound
+    ty = softmax_bound.type
+    eps = softmax_bound.value.data
+    return FloatAttr(eps / (N + 1 + N * eps), ty)
 
 
 def _identity_map(rank: int) -> AffineMap:
@@ -191,9 +192,10 @@ class DecomposeSoftmaxPattern(RewritePattern):
         reduce_dim = op.dimension.value.data
 
         softmax_bound = op.attributes.get("acc_bound")
+        N = input_ty.get_shape()[reduce_dim]
         per_exp_bound = (
-            propagate_acc_bound(softmax_bound)
-            if isinstance(softmax_bound, FloatAttr)
+            propagate_acc_bound(softmax_bound, N)
+            if isinstance(softmax_bound, FloatAttr) and N > 0
             else None
         )
 
