@@ -18,13 +18,13 @@ builtin.module {
 
 // ===== 1D, acc_bound = 1e-6 =====
 // CHECK:      func.func @softmax_1d_with_bound(%[[X:.*]]: tensor<16xf32>, %[[Y:.*]]: tensor<16xf32>) -> tensor<16xf32> {
-//             Step 1: max reduction (init: -inf, then linalg.reduce with arith.maxnumf).
+//             Step 1: max reduction (init: -inf, then linalg.reduce with arith.maximumf).
 // CHECK-NEXT:   %[[NEG_INF:.*]] = arith.constant 0xff800000 : f32
 // CHECK-NEXT:   %[[MAX_INIT:.*]] = tensor.empty() : tensor<f32>
 // CHECK-NEXT:   %[[MAX_FILLED:.*]] = linalg.fill ins(%[[NEG_INF]] : f32) outs(%[[MAX_INIT]] : tensor<f32>) -> tensor<f32>
 // CHECK-NEXT:   %[[MAX:.*]] = linalg.reduce ins(%[[X]]:tensor<16xf32>) outs(%[[MAX_FILLED]]:tensor<f32>) dimensions = [0]
 // CHECK-NEXT:   (%{{.*}}: f32, %{{.*}}: f32) {
-// CHECK-NEXT:     %{{.*}} = arith.maxnumf %{{.*}}, %{{.*}} : f32
+// CHECK-NEXT:     %{{.*}} = arith.maximumf %{{.*}}, %{{.*}} : f32
 // CHECK-NEXT:     linalg.yield %{{.*}} : f32
 // CHECK-NEXT:   }
 //             Step 2: numerator = exp(input - max). math.exp carries acc_bound.

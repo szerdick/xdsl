@@ -205,7 +205,7 @@ class DecomposeSoftmaxPattern(RewritePattern):
         max_init = _empty_with_dim_dropped(rewriter, input_ty, reduce_dim)
         max_filled = _filled(rewriter, neg_inf, max_init)
         max_val = _build_reduce(
-            rewriter, input_val, max_filled, reduce_dim, arith.MaxnumfOp
+            rewriter, input_val, max_filled, reduce_dim, arith.MaximumfOp
         )
 
         # Step 2: numerator = exp(input - max).  math.exp carries acc_bound.
