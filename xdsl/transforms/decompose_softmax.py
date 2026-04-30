@@ -30,7 +30,8 @@ def propagate_acc_bound(softmax_bound: FloatAttr, N: int) -> FloatAttr:
     """
     ty = softmax_bound.type
     eps = softmax_bound.value.data
-    return FloatAttr(eps / (N + 1 + N * eps), ty)
+    # return FloatAttr(eps / (N + 1 + N * eps), ty)
+    return FloatAttr(eps, ty)
 
 
 def _identity_map(rank: int) -> AffineMap:
