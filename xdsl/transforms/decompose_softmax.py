@@ -5,11 +5,9 @@ from xdsl.dialects import arith, linalg, math, tensor
 from xdsl.dialects.builtin import (
     AffineMapAttr,
     ArrayAttr,
-    DenseArrayBase,
     FloatAttr,
     ModuleOp,
     TensorType,
-    i64,
 )
 from xdsl.ir import Block, Region, SSAValue
 from xdsl.ir.affine import AffineExpr, AffineMap
@@ -69,10 +67,18 @@ def _build_reduce(
     reduce_dim: int,
     binop_cls: type,
 ) -> SSAValue:
-    """Emit a `linalg.reduce` with a single-arith-op body."""
+    """Emit a `linalg.generic` reduction with a single-arith-op body.
+
+    Mirrors IREE's softmax decomposition (LinalgExt/IR/AggregatedOpInterfaceImpl.cpp):
+    using `linalg.generic` with explicit indexing maps and iterator types — instead
+    of the more compact `linalg.reduce` form — keeps the op in the canonical
+    structured-op shape that downstream pipelines (e.g. xDSL's snitch lowering)
+    pattern-match on.
+    """
     input_ty = input.type
     assert isinstance(input_ty, TensorType)
     elem_ty = input_ty.get_element_type()
+    rank = len(input_ty.get_shape())
 
     body = Region(Block(arg_types=[elem_ty, elem_ty]))
     a, b = body.block.args
@@ -80,13 +86,30 @@ def _build_reduce(
     body.block.add_op(op)
     body.block.add_op(linalg.YieldOp(op.result))
 
-    reduce = linalg.ReduceOp(
-        input=input,
-        init=init,
-        dimensions=DenseArrayBase.from_list(i64, [reduce_dim]),
-        region=body,
+    indexing_maps = ArrayAttr(
+        [
+            AffineMapAttr(_identity_map(rank)),
+            AffineMapAttr(_drop_dim_map(rank, reduce_dim)),
+        ]
     )
-    return rewriter.insert(reduce).result[0]
+    iterator_types = ArrayAttr(
+        [
+            linalg.IteratorTypeAttr.reduction()
+            if d == reduce_dim
+            else linalg.IteratorTypeAttr.parallel()
+            for d in range(rank)
+        ]
+    )
+
+    generic = linalg.GenericOp(
+        inputs=(input,),
+        outputs=(init,),
+        body=body,
+        indexing_maps=indexing_maps,
+        iterator_types=iterator_types,
+        result_types=(init.type,),
+    )
+    return rewriter.insert(generic).results[0]
 
 
 def _build_sub_and_exp(

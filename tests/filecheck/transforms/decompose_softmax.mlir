@@ -18,15 +18,15 @@ builtin.module {
 
 // ===== 1D, acc_bound = 1e-6 =====
 // CHECK:      func.func @softmax_1d_with_bound(%[[X:.*]]: tensor<16xf32>, %[[Y:.*]]: tensor<16xf32>) -> tensor<16xf32> {
-//             Step 1: max reduction (init: -inf, then linalg.reduce with arith.maximumf).
+//             Step 1: max reduction as a linalg.generic with iterator_types = ["reduction"].
 // CHECK-NEXT:   %[[NEG_INF:.*]] = arith.constant 0xff800000 : f32
 // CHECK-NEXT:   %[[MAX_INIT:.*]] = tensor.empty() : tensor<f32>
 // CHECK-NEXT:   %[[MAX_FILLED:.*]] = linalg.fill ins(%[[NEG_INF]] : f32) outs(%[[MAX_INIT]] : tensor<f32>) -> tensor<f32>
-// CHECK-NEXT:   %[[MAX:.*]] = linalg.reduce ins(%[[X]]:tensor<16xf32>) outs(%[[MAX_FILLED]]:tensor<f32>) dimensions = [0]
-// CHECK-NEXT:   (%{{.*}}: f32, %{{.*}}: f32) {
+// CHECK-NEXT:   %[[MAX:.*]] = linalg.generic {indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>], iterator_types = ["reduction"]} ins(%[[X]] : tensor<16xf32>) outs(%[[MAX_FILLED]] : tensor<f32>) {
+// CHECK-NEXT:   ^{{.*}}(%{{.*}}: f32, %{{.*}}: f32):
 // CHECK-NEXT:     %{{.*}} = arith.maximumf %{{.*}}, %{{.*}} : f32
 // CHECK-NEXT:     linalg.yield %{{.*}} : f32
-// CHECK-NEXT:   }
+// CHECK-NEXT:   } -> tensor<f32>
 //             Step 2: numerator = exp(input - max). math.exp carries acc_bound.
 // CHECK-NEXT:   %[[NUMER:.*]] = linalg.generic {indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]} ins(%[[X]], %[[MAX]] : tensor<16xf32>, tensor<f32>) outs(%[[Y]] : tensor<16xf32>) {
 // CHECK-NEXT:   ^{{.*}}(%{{.*}}: f32, %{{.*}}: f32, %{{.*}}: f32):
@@ -34,15 +34,15 @@ builtin.module {
 // CHECK-NEXT:     %{{.*}} = math.exp %{{.*}} {acc_bound = 1.000000e-06 : f32} : f32
 // CHECK-NEXT:     linalg.yield %{{.*}} : f32
 // CHECK-NEXT:   } -> tensor<16xf32>
-//             Step 3: sum reduction.
+//             Step 3: sum reduction as a linalg.generic with iterator_types = ["reduction"].
 // CHECK-NEXT:   %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK-NEXT:   %[[SUM_INIT:.*]] = tensor.empty() : tensor<f32>
 // CHECK-NEXT:   %[[SUM_FILLED:.*]] = linalg.fill ins(%[[ZERO]] : f32) outs(%[[SUM_INIT]] : tensor<f32>) -> tensor<f32>
-// CHECK-NEXT:   %[[DENOM:.*]] = linalg.reduce ins(%[[NUMER]]:tensor<16xf32>) outs(%[[SUM_FILLED]]:tensor<f32>) dimensions = [0]
-// CHECK-NEXT:   (%{{.*}}: f32, %{{.*}}: f32) {
+// CHECK-NEXT:   %[[DENOM:.*]] = linalg.generic {indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>], iterator_types = ["reduction"]} ins(%[[NUMER]] : tensor<16xf32>) outs(%[[SUM_FILLED]] : tensor<f32>) {
+// CHECK-NEXT:   ^{{.*}}(%{{.*}}: f32, %{{.*}}: f32):
 // CHECK-NEXT:     %{{.*}} = arith.addf %{{.*}}, %{{.*}} : f32
 // CHECK-NEXT:     linalg.yield %{{.*}} : f32
-// CHECK-NEXT:   }
+// CHECK-NEXT:   } -> tensor<f32>
 //             Step 4: divide.
 // CHECK-NEXT:   %[[R:.*]] = linalg.generic {indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> ()>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]} ins(%[[NUMER]], %[[DENOM]] : tensor<16xf32>, tensor<f32>) outs(%[[Y]] : tensor<16xf32>) {
 // CHECK-NEXT:   ^{{.*}}(%{{.*}}: f32, %{{.*}}: f32, %{{.*}}: f32):
@@ -53,9 +53,10 @@ builtin.module {
 
 // ===== 2D dim=1, no acc_bound =====
 // CHECK:      func.func @softmax_2d_no_bound(%[[X2:.*]]: tensor<4x8xf32>, %[[Y2:.*]]: tensor<4x8xf32>) -> tensor<4x8xf32> {
-//             Reduced shape is tensor<4xf32> (drop dim 1). Iterators are 2 parallel dims.
+//             Reduced shape is tensor<4xf32> (drop dim 1). Reduce-form generic has
+//             iterator_types = ["parallel", "reduction"].
 // CHECK:        %{{.*}} = tensor.empty() : tensor<4xf32>
-// CHECK:        linalg.reduce ins(%[[X2]]:tensor<4x8xf32>) outs(%{{.*}}:tensor<4xf32>) dimensions = [1]
+// CHECK:        linalg.generic {indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>], iterator_types = ["parallel", "reduction"]} ins(%[[X2]] : tensor<4x8xf32>) outs(%{{.*}} : tensor<4xf32>)
 //             math.exp must NOT carry an acc_bound attribute when softmax has none.
 // CHECK:        linalg.generic {indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = ["parallel", "parallel"]}
 // CHECK:          arith.subf
