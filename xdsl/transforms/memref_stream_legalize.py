@@ -121,6 +121,8 @@ class MemRefStreamGenericLegalize(RewritePattern):
     def match_and_rewrite(
         self, op: memref_stream.GenericOp, rewriter: PatternRewriter
     ) -> None:
+        if not op.iterator_types.data:
+            return
         # Collect block arguments that need to be legalized
         legalizations: dict[int, StreamingVectorLegalizationType] = {}
         for i, arg in enumerate(op.body.block.args):
