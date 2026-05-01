@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 
 from xdsl.context import Context
-from xdsl.dialects import arith, linalg, math, tensor
+from xdsl.dialects import arith, linalg, math, scf, tensor
 from xdsl.dialects.builtin import (
     AffineMapAttr,
     ArrayAttr,
     FloatAttr,
+    IndexType,
+    IntegerAttr,
     ModuleOp,
     TensorType,
 )
@@ -42,74 +44,42 @@ def _drop_dim_map(rank: int, dim: int) -> AffineMap:
     return AffineMap(rank, 0, results)
 
 
-def _scalar_const(rewriter: PatternRewriter, value: float, ty) -> SSAValue:
-    return rewriter.insert(arith.ConstantOp(FloatAttr(value, ty))).result
-
-
-def _empty_with_dim_dropped(
-    rewriter: PatternRewriter, input_ty: TensorType, dim: int
-) -> SSAValue:
-    shape = list(input_ty.get_shape())
-    del shape[dim]
-    reduced_ty = TensorType(input_ty.get_element_type(), shape)
-    return rewriter.insert(tensor.EmptyOp((), reduced_ty)).tensor
-
-
-def _filled(rewriter: PatternRewriter, fill_value: SSAValue, out: SSAValue) -> SSAValue:
-    fill = linalg.FillOp(inputs=(fill_value,), outputs=(out,), res=(out.type,))
-    return rewriter.insert(fill).results[0]
-
-
 def _build_reduce(
     rewriter: PatternRewriter,
     input: SSAValue,
-    init: SSAValue,
-    reduce_dim: int,
+    init_value: float,
     binop_cls: type,
 ) -> SSAValue:
-    """Emit a `linalg.generic` reduction with a single-arith-op body.
+    """Reduce a 1-D tensor along its single axis using `scf.for` + iter_args.
 
-    Mirrors IREE's softmax decomposition (LinalgExt/IR/AggregatedOpInterfaceImpl.cpp):
-    using `linalg.generic` with explicit indexing maps and iterator types — instead
-    of the more compact `linalg.reduce` form — keeps the op in the canonical
-    structured-op shape that downstream pipelines (e.g. xDSL's snitch lowering)
-    pattern-match on.
+    Returns the scalar reduction result.
     """
     input_ty = input.type
     assert isinstance(input_ty, TensorType)
     elem_ty = input_ty.get_element_type()
-    rank = len(input_ty.get_shape())
+    shape = list(input_ty.get_shape())
+    if len(shape) != 1:
+        raise NotImplementedError(
+            "decompose-softmax: scf.for-based reduction only supports 1-D "
+            f"inputs; got shape {shape}"
+        )
+    n = shape[0]
 
-    body = Region(Block(arg_types=[elem_ty, elem_ty]))
-    a, b = body.block.args
-    op = binop_cls(a, b)
-    body.block.add_op(op)
-    body.block.add_op(linalg.YieldOp(op.result))
+    init = rewriter.insert(arith.ConstantOp(FloatAttr(init_value, elem_ty))).result
+    c0 = rewriter.insert(arith.ConstantOp(IntegerAttr(0, IndexType()))).result
+    cN = rewriter.insert(arith.ConstantOp(IntegerAttr(n, IndexType()))).result
+    c1 = rewriter.insert(arith.ConstantOp(IntegerAttr(1, IndexType()))).result
 
-    indexing_maps = ArrayAttr(
-        [
-            AffineMapAttr(_identity_map(rank)),
-            AffineMapAttr(_drop_dim_map(rank, reduce_dim)),
-        ]
-    )
-    iterator_types = ArrayAttr(
-        [
-            linalg.IteratorTypeAttr.reduction()
-            if d == reduce_dim
-            else linalg.IteratorTypeAttr.parallel()
-            for d in range(rank)
-        ]
-    )
+    body_block = Block(arg_types=[IndexType(), elem_ty])
+    iv, acc = body_block.args
+    extract = tensor.ExtractOp(input, (iv,), elem_ty)
+    body_block.add_op(extract)
+    binop = binop_cls(extract.result, acc)
+    body_block.add_op(binop)
+    body_block.add_op(scf.YieldOp(binop.result))
 
-    generic = linalg.GenericOp(
-        inputs=(input,),
-        outputs=(init,),
-        body=body,
-        indexing_maps=indexing_maps,
-        iterator_types=iterator_types,
-        result_types=(init.type,),
-    )
-    return rewriter.insert(generic).results[0]
+    for_op = rewriter.insert(scf.ForOp(c0, cN, c1, (init,), Region(body_block)))
+    return for_op.res[0]
 
 
 def _build_sub_and_exp(
@@ -212,7 +182,6 @@ class DecomposeSoftmaxPattern(RewritePattern):
         input_ty = input_val.type
         if not isinstance(input_ty, TensorType):
             return
-        elem_ty = input_ty.get_element_type()
         reduce_dim = op.dimension.value.data
 
         softmax_bound = op.attributes.get("acc_bound")
@@ -223,26 +192,16 @@ class DecomposeSoftmaxPattern(RewritePattern):
             else None
         )
 
-        # Step 1: max along dim.
-        neg_inf = _scalar_const(rewriter, float("-inf"), elem_ty)
-        max_init = _empty_with_dim_dropped(rewriter, input_ty, reduce_dim)
-        max_filled = _filled(rewriter, neg_inf, max_init)
-        max_val = _build_reduce(
-            rewriter, input_val, max_filled, reduce_dim, arith.MaximumfOp
-        )
+        # Step 1: max along dim — scalar accumulator via scf.for.
+        max_val = _build_reduce(rewriter, input_val, float("-inf"), arith.MaximumfOp)
 
         # Step 2: numerator = exp(input - max).  math.exp carries acc_bound.
         numerator = _build_sub_and_exp(
             rewriter, input_val, max_val, output_val, reduce_dim, per_exp_bound
         )
 
-        # Step 3: denominator = sum along dim.
-        zero = _scalar_const(rewriter, 0.0, elem_ty)
-        sum_init = _empty_with_dim_dropped(rewriter, input_ty, reduce_dim)
-        sum_filled = _filled(rewriter, zero, sum_init)
-        denominator = _build_reduce(
-            rewriter, numerator, sum_filled, reduce_dim, arith.AddfOp
-        )
+        # Step 3: denominator = sum along dim — scalar accumulator via scf.for.
+        denominator = _build_reduce(rewriter, numerator, 0.0, arith.AddfOp)
 
         # Step 4: result = numerator / denominator.
         result = _build_div(rewriter, numerator, denominator, output_val, reduce_dim)
